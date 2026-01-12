@@ -31,4 +31,26 @@ if yuklenen_dosya is not None:
         final_df = df.iloc[:, ust_birim_index : ust_birim_index + 17]
 
         # 3. ADIM: Mağaza kodlarına göre filtrele
-        final_df = final_df[final_df
+        final_df = final_df[final_df['Üst Birim'].isin(secilen_kodlar)]
+
+        if not final_df.empty:
+            st.write("### Ayıklanan Tablo (İlk Sütun: Üst Birim)")
+            st.dataframe(final_df)
+
+            if st.button("🖼️ Fotoğraf Olarak İndir"):
+                with st.spinner('Fotoğraf hazırlanıyor...'):
+                    resim_yolu = "ozel_cikti.png"
+                    # Tabloyu resme dönüştür
+                    dfi.export(final_df, resim_yolu)
+                    
+                    with open(resim_yolu, "rb") as file:
+                        st.download_button(
+                            label="Fotoğrafı Kaydet",
+                            data=file,
+                            file_name="magaza_ozel_rapor.png",
+                            mime="image/png"
+                        )
+        else:
+            st.warning("Seçilen mağaza kodlarına uygun veri bulunamadı.")
+    else:
+        st.error("Dosyada 'Üst Birim' sütunu bulunamadı!")
