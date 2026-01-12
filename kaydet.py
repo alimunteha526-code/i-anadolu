@@ -20,7 +20,7 @@ if yuklenen_dosya is not None:
             # 2. Satır Seçimi (Excel 26-43 aralığı)
             final_df = df_full.iloc[22:40, start_col : start_col + 17].copy()
 
-            # 3. VERİ TEMİZLEME: Sayıya çevir, çevrilemezse NaN yap
+            # 3. VERİ TEMİZLEME (Hata Engelleyici)
             oran_cols = [c for c in final_df.columns if 'Oran' in str(c) or 'Hedef' in str(c)]
             for col in oran_cols:
                 final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
@@ -29,40 +29,45 @@ if yuklenen_dosya is not None:
             if target_col in final_df.columns:
                 final_df = final_df.sort_values(by=target_col, ascending=False)
 
-            # 5. EN BAŞA BÖLGE SATIRI EKLEME
+            # 5. BAŞLIK SATIRI OLUŞTURMA (İlk iki hücreyi kapsayan metin)
             baslik_satiri = pd.DataFrame(columns=final_df.columns)
             baslik_satiri.loc[0] = [""] * len(final_df.columns)
-            baslik_satiri.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ"
+            # Metni ilk iki hücreye paylaştırıyoruz (veya yan yana görünmesini sağlıyoruz)
+            baslik_satiri.iloc[0, 0] = "İÇ ANADOLU"
+            baslik_satiri.iloc[0, 1] = "BÖLGESİ"
+            
             final_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
 
-            # 6. DİNAMİK FORMATLAMA FONKSİYONU (Hata Engelleyici)
-            def format_func(x):
-                # Eğer x bir sayıysa yüzde yap, değilse (metinse) olduğu gibi bırak
-                if isinstance(x, (int, float)) and pd.notnull(x):
-                    return "{:.1%}".format(x)
-                return str(x) if pd.notnull(x) else "-"
+            # 6. GÜVENLİ FORMATLAMA FONKSİYONU
+            def format_yuzde(x):
+                try:
+                    if pd.isna(x) or isinstance(x, str): return "-"
+                    return "{:.1%}".format(float(x))
+                except: return str(x)
 
             # 7. GÖRSEL STİL
             def stil_uygula(row):
-                if row.iloc[0] == "İÇ ANADOLU BÖLGESİ":
-                    return ['background-color: #2c3e50; color: white; font-weight: bold; text-align: center'] * len(row)
+                # Başlık satırı kontrolü (İlk hücrede İÇ ANADOLU yazıyorsa)
+                if row.iloc[0] == "İÇ ANADOLU":
+                    return ['background-color: #2c3e50; color: white; font-weight: bold; text-align: center; font-size: 14px'] * len(row)
                 
                 styles = [''] * len(row)
                 if target_col in row.index:
                     val = row[target_col]
-                    if isinstance(val, (int, float)) and pd.notnull(val) and val > 0.058:
-                        idx = row.index.get_loc(target_col)
-                        styles[idx] = 'background-color: #e74c3c; color: white; font-weight: bold'
+                    # Sayısal değerleri kontrol et (%5.8 sınırı)
+                    try:
+                        num_val = float(val)
+                        if num_val > 0.058:
+                            idx = row.index.get_loc(target_col)
+                            styles[idx] = 'background-color: #e74c3c; color: white; font-weight: bold'
+                    except: pass
                 return styles
 
-            # 8. TABLO OLUŞTURMA
-            # .format() yerine .map() kullanarak her hücreyi tek tek kontrol ediyoruz (En güvenli yol)
-            styled_df = final_df.style.map(lambda x: '', subset=oran_cols) # Önce temizle
-            
-            # Oran sütunlarına özel format uygula
+            # Formatı uygula
             for col in oran_cols:
-                final_df[col] = final_df[col].apply(format_func)
+                final_df[col] = final_df[col].apply(format_yuzde)
 
+            # Tabloyu oluştur
             styled_df = final_df.style.apply(stil_uygula, axis=1)\
                 .set_properties(**{
                     'text-align': 'center',
@@ -84,4 +89,4 @@ if yuklenen_dosya is not None:
             st.error("'Üst Birim' sütunu bulunamadı!")
                 
     except Exception as e:
-        st.error(f"Kritik Hata: {e}")
+        st.error(f"Sistemsel Hata: {e}")
