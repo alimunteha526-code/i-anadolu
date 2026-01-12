@@ -11,6 +11,7 @@ yuklenen_dosya = st.file_uploader("Excel Dosyasını Buraya Yükleyin", type=['x
 
 if yuklenen_dosya is not None:
     try:
+        # 1. Excel'i oku
         df_full = pd.read_excel(yuklenen_dosya, header=2)
         df_full.columns = [str(c).strip() for c in df_full.columns]
 
@@ -18,7 +19,7 @@ if yuklenen_dosya is not None:
             start_col = df_full.columns.get_loc('Üst Birim')
             target_col = 'Toplam Cam Zayi Oranı'
             
-            # Veri Hazırlama (26-43 aralığı)
+            # Veri Hazırlama (Excel 26-43 aralığı)
             final_df = df_full.iloc[22:40, start_col : start_col + 17].copy()
 
             # Sayısal dönüşüm ve sıralama
@@ -32,7 +33,7 @@ if yuklenen_dosya is not None:
             # Başlık Satırı
             baslik_satiri = pd.DataFrame(columns=final_df.columns)
             baslik_satiri.loc[0] = [""] * len(final_df.columns)
-            baslik_satiri.iloc[0, 0] = "IC ANADOLU BOLGESI" # Türkçe karakter hatası riskine karşı
+            baslik_satiri.iloc[0, 0] = "IC ANADOLU BOLGESI"
             
             report_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
 
@@ -42,38 +43,59 @@ if yuklenen_dosya is not None:
             col1, col2 = st.columns(2)
 
             with col1:
-                # EXCEL ÇIKTISI
+                # --- EXCEL ÇIKTISI ---
                 buffer_ex = io.BytesIO()
                 with pd.ExcelWriter(buffer_ex, engine='xlsxwriter') as writer:
                     report_df.to_excel(writer, index=False)
-                st.download_button("📥 Excel Olarak İndir", buffer_ex.getvalue(), "zayi_listesi.xlsx")
+                st.download_button(
+                    label="📥 Excel Olarak İndir",
+                    data=buffer_ex.getvalue(),
+                    file_name="ic_anadolu_zayi.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
             with col2:
-                # GELİŞMİŞ PDF ÇIKTISI
+                # --- PDF ÇIKTISI (HATA GİDERİLMİŞ) ---
                 try:
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
                     pdf.add_page()
-                    pdf.set_font("Helvetica", "B", 12)
+                    pdf.set_font("Helvetica", "B", 11)
                     pdf.cell(0, 10, "IC ANADOLU AEL ZAYI RAPORU", ln=True, align='C')
-                    pdf.set_font("Helvetica", size=7) # 17 sütun için küçük font
+                    pdf.set_font("Helvetica", size=6) # 17 sütun için fontu küçülttük
                     
-                    # Sütun Genişlikleri
+                    # Sayfa genişliğini sütun sayısına böl
                     col_width = pdf.epw / len(report_df.columns)
                     
-                    # Tabloyu Çiz
-                    for row in report_df.itertuples(index=False):
+                    for i, row in report_df.iterrows():
+                        # Bölge başlığı satırı için renk değiştir (isteğe bağlı)
+                        if row.iloc[0] == "IC ANADOLU BOLGESI":
+                            pdf.set_fill_color(44, 62, 80)
+                            pdf.set_text_color(255, 255, 255)
+                        else:
+                            pdf.set_fill_color(255, 255, 255)
+                            pdf.set_text_color(0, 0, 0)
+                            
                         for item in row:
-                            val = str(item) if pd.notna(item) else "-"
-                            # Oranları % formatına çevir
-                            if isinstance(item, float) and item < 1:
+                            val = str(item) if pd.notna(item) else ""
+                            # Sayısal oranları görselleştir
+                            if isinstance(item, (float, int)) and 0 < item < 1:
                                 val = f"{item:.1%}"
-                            pdf.cell(col_width, 8, val[:12], border=1)
+                            
+                            pdf.cell(col_width, 7, val[:12], border=1, fill=True)
                         pdf.ln()
 
-                    pdf_bytes = pdf.output()
-                    st.download_button("📥 PDF Olarak İndir", pdf_bytes, "zayi_raporu.pdf")
+                    # KRİTİK DÜZELTME: bytearray'i bytes formatına çeviriyoruz
+                    pdf_output = pdf.output()
+                    pdf_bytes = bytes(pdf_output) 
+                    
+                    st.download_button(
+                        label="📥 PDF Olarak İndir",
+                        data=pdf_bytes,
+                        file_name="ic_anadolu_zayi.pdf",
+                        mime="application/pdf"
+                    )
                 except Exception as e:
-                    st.error(f"PDF Oluşturulamadı: {e}")
+                    st.error(f"PDF Hatası: {e}")
         else:
             st.error("'Üst Birim' bulunamadı.")
     except Exception as e:
