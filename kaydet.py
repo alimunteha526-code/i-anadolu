@@ -2,49 +2,50 @@ import streamlit as st
 import pandas as pd
 import dataframe_image as dfi
 
-# Sayfa ayarlarını geniş yapalım
-st.set_page_config(page_title="Mağaza Raporu", layout="wide")
+st.set_page_config(page_title="Özel Aralık Raporu", layout="wide")
 
-varsayilan_magazalar = ["M38001", "M38003", "M38002", "M38005", "M38004", "M42001"]
+st.title("📊 Satır Aralığına Göre Mağaza Raporu")
 
-st.title("📊 Kompakt Mağaza Raporu")
-
-secilen_kodlar = st.multiselect("Mağazaları Seçin:", options=varsayilan_magazalar, default=varsayilan_magazalar)
-
-yuklenen_dosya = st.file_uploader("Excel Yükleyin", type=['xlsx'])
+yuklenen_dosya = st.file_uploader("Excel Dosyasını Yükleyin", type=['xlsx'])
 
 if yuklenen_dosya is not None:
-    df = pd.read_excel(yuklenen_dosya, skiprows=2)
-    df.columns = df.columns.str.strip()
+    # 1. Excel'in tamamını oku (Ham haliyle)
+    df = pd.read_excel(yuklenen_dosya, header=None)
 
-    if 'Üst Birim' in df.columns:
-        ust_birim_index = df.columns.get_loc('Üst Birim')
-        final_df = df.iloc[:, ust_birim_index : ust_birim_index + 17].copy()
-        final_df = final_df[final_df['Üst Birim'].isin(secilen_kodlar)]
+    # 2. SATIR FİLTRELEME: 26 ile 43. satırlar (Python 0'dan başladığı için 25:43 yapılır)
+    # Excel'deki 26. satır Python'da 25. indekstir.
+    df_range = df.iloc[25:43].copy()
 
-        if not final_df.empty:
-            # --- SIKIŞTIRMA VE BİÇİMLENDİRME ---
-            oran_sutunlari = [col for col in final_df.columns if 'Oran' in col or 'Hedef' in col]
-            
-            # Stil ayarları: Yazı boyutu, hizalama ve boşlukları sıfırlama
-            styled_df = final_df.style.format({col: "{:.1%}" for col in oran_sutunlari})\
-                .set_properties(**{
-                    'text-align': 'center', # Yazıları ortala
-                    'font-size': '12px',    # Yazı boyutunu hafif küçült
-                    'white-space': 'nowrap' # Yazıların alt satıra geçmesini engelle (sütunu daraltır)
-                })\
-                .set_table_styles([
-                    {'selector': 'th', 'props': [('font-size', '12px'), ('text-align', 'center')]}
-                ])
-            
-            st.write("### Önizleme (Daraltılmış)")
-            st.write(styled_df)
+    # 3. Başlıkları Ayarla: Normalde başlıklar 3. satırda (indeks 2)
+    basliklar = df.iloc[2].values
+    df_range.columns = basliklar
+    df_range.columns = df_range.columns.str.strip() # Boşlukları temizle
 
-            if st.button("🖼️ Fotoğrafı Al"):
-                with st.spinner('Fotoğraf hazırlanıyor...'):
-                    resim_yolu = "dar_tablo.png"
-                    # 'chrome' modu sütunları en dar haline getirir
-                    dfi.export(styled_df, resim_yolu, table_conversion='chrome')
-                    
-                    with open(resim_yolu, "rb") as file:
-                        st.download_button("İndir", file, "magaza_rapor.png", "image/png")
+    if 'Üst Birim' in df_range.columns:
+        # 4. SÜTUN FİLTRELEME: 'Üst Birim'den başla ve 17 sütun al
+        ust_birim_idx = list(df_range.columns).index('Üst Birim')
+        final_df = df_range.iloc[:, ust_birim_idx : ust_birim_idx + 17].copy()
+
+        # 5. BİÇİMLENDİRME: Oranları % yap ve tabloyu daralt
+        oran_sutunlari = [col for col in final_df.columns if 'Oran' in str(col) or 'Hedef' in str(col)]
+        
+        styled_df = final_df.style.format({col: "{:.1%}" for col in oran_sutunlari if col in final_df.columns})\
+            .set_properties(**{
+                'text-align': 'center',
+                'font-size': '11px',
+                'white-space': 'nowrap',
+                'border': '1px solid lightgrey'
+            })
+
+        st.write("### 26-43. Satırlar Arası Rapor")
+        st.write(styled_df)
+
+        if st.button("🖼️ Fotoğraf Olarak İndir"):
+            with st.spinner('Görüntü oluşturuluyor...'):
+                resim_yolu = "ozel_aralik.png"
+                dfi.export(styled_df, resim_yolu, table_conversion='chrome')
+                
+                with open(resim_yolu, "rb") as file:
+                    st.download_button("Dosyayı Kaydet", file, "magaza_listesi.png", "image/png")
+    else:
+        st.error("'Üst Birim' sütunu bulunamadı. Lütfen satır aralığını kontrol edin.")
