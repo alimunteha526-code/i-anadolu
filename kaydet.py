@@ -20,25 +20,26 @@ if yuklenen_dosya is not None:
             # 2. SATIR SEÇİMİ (Excel 26-43 aralığı)
             final_df = df_full.iloc[22:40, start_col : start_col + 17].copy()
 
-            # 3. VERİ TEMİZLEME VE SIRALAMA (Kritik Bölüm)
+            # 3. HATA ÇÖZÜMÜ: Verileri Sayıya Çevirme
+            # 'Oran' veya 'Hedef' kelimesi geçen sütunları bul
             oran_cols = [c for c in final_df.columns if 'Oran' in str(c) or 'Hedef' in str(c)]
             
-            # Oran sütunlarını sayıya çevir (Hata almamak ve doğru sıralamak için)
             for col in oran_cols:
+                # errors='coerce' metinleri (str) otomatik olarak geçersiz sayı (NaN) yapar
                 final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
 
-            # --- SIRALAMA İŞLEMİ (Büyükten Küçüğe) ---
+            # 4. SIRALAMA (Büyükten Küçüğe)
             if target_col in final_df.columns:
                 final_df = final_df.sort_values(by=target_col, ascending=False)
 
-            # 4. EN BAŞA BÖLGE SATIRI EKLEME (Sıralamadan sonra ekliyoruz ki en üstte kalsın)
+            # 5. EN BAŞA BÖLGE SATIRI EKLEME
             baslik_satiri = pd.DataFrame(columns=final_df.columns)
             baslik_satiri.loc[0] = [""] * len(final_df.columns)
             baslik_satiri.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ"
             
             final_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
 
-            # 5. GÖRSEL STİL FONKSİYONLARI
+            # 6. GÖRSEL STİL FONKSİYONLARI
             def stil_uygula(row):
                 if row.iloc[0] == "İÇ ANADOLU BÖLGESİ":
                     return ['background-color: #2c3e50; color: white; font-weight: bold; text-align: center'] * len(row)
@@ -46,13 +47,14 @@ if yuklenen_dosya is not None:
                 styles = [''] * len(row)
                 if target_col in row.index:
                     val = row[target_col]
-                    # %5.8 (0.058) üzerindeyse kırmızı yap
+                    # Sadece geçerli sayılar için %5.8 kontrolü yap
                     if pd.notnull(val) and isinstance(val, (int, float)) and val > 0.058:
                         idx = row.index.get_loc(target_col)
                         styles[idx] = 'background-color: #e74c3c; color: white; font-weight: bold'
                 return styles
 
-            # 6. TABLO FORMATLAMA
+            # 7. TABLO FORMATLAMA (Hataya Karşı Korumalı)
+            # na_rep="-" ifadesi sayı olmayan yerlere hata vermek yerine tire koyar
             styled_df = final_df.style.format({c: "{:.1%}" for c in oran_cols}, na_rep="-")\
                 .apply(stil_uygula, axis=1)\
                 .set_properties(**{
@@ -63,19 +65,18 @@ if yuklenen_dosya is not None:
                 })\
                 .hide(axis="index")
 
-            st.write("### Sıralanmış Liste Önizlemesi (Büyükten Küçüğe)")
+            st.write("### Düzenlenmiş ve Sıralanmış Liste")
             st.write(styled_df)
 
-            # 7. FOTOĞRAF ÇIKTISI
-            if st.button("🖼️ Fotoğrafı Hazırla ve İndir"):
-                with st.spinner('Görsel oluşturuluyor...'):
-                    resim_adi = "zayi_sirali_liste.png"
+            # 8. FOTOĞRAF ÇIKTISI
+            if st.button("🖼️ Fotoğrafı Hazırla"):
+                with st.spinner('Görsel hazırlanıyor...'):
+                    resim_adi = "zayi_listesi.png"
                     dfi.export(styled_df, resim_adi, table_conversion='chrome')
-                    
                     with open(resim_adi, "rb") as file:
                         st.download_button("Görseli Kaydet", file, "zayi_listesi.png", "image/png")
         else:
             st.error("'Üst Birim' sütunu bulunamadı!")
                 
     except Exception as e:
-        st.error(f"Hata detayı: {e}")
+        st.error(f"Beklenmedik bir hata: {e}")
