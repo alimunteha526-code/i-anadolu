@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import dataframe_image as dfi
+import io
+from fpdf import FPDF
 
 st.set_page_config(page_title="Zayi Düzenleme Paneli", layout="wide")
 st.title("📋 İÇ ANADOLU AEL ZAYİ LİSTESİ DÜZENLEME PANELİ")
@@ -9,7 +10,7 @@ yuklenen_dosya = st.file_uploader("Excel Dosyasını Buraya Yükleyin", type=['x
 
 if yuklenen_dosya is not None:
     try:
-        # 1. Excel'i oku (Header 3. satırda - İndeks 2)
+        # 1. Excel'i oku
         df_full = pd.read_excel(yuklenen_dosya, header=2)
         df_full.columns = [str(c).strip() for c in df_full.columns]
 
@@ -20,73 +21,100 @@ if yuklenen_dosya is not None:
             # 2. Satır Seçimi (Excel 26-43 aralığı)
             final_df = df_full.iloc[22:40, start_col : start_col + 17].copy()
 
-            # 3. VERİ TEMİZLEME (Hata Engelleyici)
+            # 3. Veri Temizleme ve Sayıya Çevirme
             oran_cols = [c for c in final_df.columns if 'Oran' in str(c) or 'Hedef' in str(c)]
             for col in oran_cols:
                 final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
 
-            # 4. SIRALAMA (Büyükten Küçüğe)
+            # 4. Sıralama (Büyükten Küçüğe)
             if target_col in final_df.columns:
                 final_df = final_df.sort_values(by=target_col, ascending=False)
 
-            # 5. BAŞLIK SATIRI OLUŞTURMA (İlk iki hücreyi kapsayan metin)
+            # 5. Başlık Satırı Oluşturma
             baslik_satiri = pd.DataFrame(columns=final_df.columns)
             baslik_satiri.loc[0] = [""] * len(final_df.columns)
-            # Metni ilk iki hücreye paylaştırıyoruz (veya yan yana görünmesini sağlıyoruz)
             baslik_satiri.iloc[0, 0] = "İÇ ANADOLU"
             baslik_satiri.iloc[0, 1] = "BÖLGESİ"
             
             final_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
 
-            # 6. GÜVENLİ FORMATLAMA FONKSİYONU
+            # 6. Güvenli Formatlama Fonksiyonu (Görünüm için)
             def format_yuzde(x):
-                try:
-                    if pd.isna(x) or isinstance(x, str): return "-"
-                    return "{:.1%}".format(float(x))
-                except: return str(x)
+                if pd.isna(x) or isinstance(x, str) or x == "": return x
+                return "{:.1%}".format(x)
 
-            # 7. GÖRSEL STİL
-            def stil_uygula(row):
-                # Başlık satırı kontrolü (İlk hücrede İÇ ANADOLU yazıyorsa)
-                if row.iloc[0] == "İÇ ANADOLU":
-                    return ['background-color: #2c3e50; color: white; font-weight: bold; text-align: center; font-size: 14px'] * len(row)
-                
-                styles = [''] * len(row)
-                if target_col in row.index:
-                    val = row[target_col]
-                    # Sayısal değerleri kontrol et (%5.8 sınırı)
-                    try:
-                        num_val = float(val)
-                        if num_val > 0.058:
-                            idx = row.index.get_loc(target_col)
-                            styles[idx] = 'background-color: #e74c3c; color: white; font-weight: bold'
-                    except: pass
-                return styles
-
-            # Formatı uygula
+            # Görüntüleme için kopyasını oluştur (Excel'i bozmamak için)
+            display_df = final_df.copy()
             for col in oran_cols:
-                final_df[col] = final_df[col].apply(format_yuzde)
+                display_df[col] = display_df[col].apply(format_yuzde)
 
-            # Tabloyu oluştur
-            styled_df = final_df.style.apply(stil_uygula, axis=1)\
-                .set_properties(**{
-                    'text-align': 'center',
-                    'font-size': '12px',
-                    'border': '1px solid black',
-                    'white-space': 'nowrap'
-                })\
+            # 7. Görsel Stil (Streamlit Önizleme)
+            def stil_uygula(row):
+                if row.iloc[0] == "İÇ ANADOLU":
+                    return ['background-color: #2c3e50; color: white; font-weight: bold'] * len(row)
+                return [''] * len(row)
+
+            styled_df = display_df.style.apply(stil_uygula, axis=1)\
+                .set_properties(**{'text-align': 'center', 'border': '1px solid black'})\
                 .hide(axis="index")
 
-            st.write("### Düzenlenmiş ve Sıralanmış Liste")
+            st.write("### Düzenlenmiş Liste Önizlemesi")
             st.write(styled_df)
 
-            if st.button("🖼️ Fotoğrafı Hazırla"):
-                resim_adi = "zayi_listesi.png"
-                dfi.export(styled_df, resim_adi, table_conversion='chrome')
-                with open(resim_adi, "rb") as file:
-                    st.download_button("Görseli Kaydet", file, "zayi_listesi.png", "image/png")
+            # --- İNDİRME BUTONLARI ---
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # EXCEL OLARAK İNDİR
+                buffer_excel = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine='xlsxwriter') as writer:
+                    final_df.to_excel(writer, index=False, sheet_name='Zayi_Raporu')
+                
+                st.download_button(
+                    label="📥 Excel Olarak İndir",
+                    data=buffer_excel.getvalue(),
+                    file_name="zayi_listesi_duzenlenmiş.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            with col2:
+                # PDF OLARAK İNDİR (Basit Tablo Modu)
+                pdf = FPDF(orientation='L', unit='mm', format='A4')
+                pdf.add_page()
+                pdf.set_font("Arial", size=8)
+                
+                # Tablo Genişliği Ayarı
+                col_width = pdf.w / (len(final_df.columns) + 1)
+                
+                # Başlıkları Yaz
+                pdf.set_fill_color(200, 200, 200)
+                for col in final_df.columns:
+                    pdf.cell(col_width, 10, str(col)[:10], border=1, fill=True)
+                pdf.ln()
+
+                # Verileri Yaz
+                for i, row in display_df.iterrows():
+                    if row.iloc[0] == "İÇ ANADOLU":
+                        pdf.set_fill_color(44, 62, 80)
+                        pdf.set_text_color(255, 255, 255)
+                    else:
+                        pdf.set_fill_color(255, 255, 255)
+                        pdf.set_text_color(0, 0, 0)
+                    
+                    for val in row:
+                        pdf.cell(col_width, 8, str(val)[:10], border=1, fill=True)
+                    pdf.ln()
+
+                pdf_output = pdf.output(dest='S').encode('latin-1', 'replace')
+                st.download_button(
+                    label="📥 PDF Olarak İndir",
+                    data=pdf_output,
+                    file_name="zayi_listesi.pdf",
+                    mime="application/pdf"
+                )
+
         else:
             st.error("'Üst Birim' sütunu bulunamadı!")
                 
     except Exception as e:
-        st.error(f"Sistemsel Hata: {e}")
+        st.error(f"Hata: {e}")
