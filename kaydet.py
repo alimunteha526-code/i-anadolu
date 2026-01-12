@@ -2,52 +2,33 @@ import streamlit as st
 import pandas as pd
 import dataframe_image as dfi
 
-st.set_page_config(page_title="Mağaza Analiz", layout="wide")
+st.set_page_config(page_title="Mağaza Raporu", layout="wide")
 
-# 1. Mağaza Listesini Tanımlayalım
+# Mağaza kodları listesi
 varsayilan_magazalar = ["M38001", "M38003", "M38002", "M38005", "M38004", "M42001"]
 
-st.title("📊 Mağaza Bazlı Excel Ayıklayıcı")
+st.title("📊 Mağaza Koduna Özel Rapor")
 
-# Yan menüde mağaza seçimi yapabilmen için bir alan
 secilen_kodlar = st.multiselect(
-    "Raporlanacak Mağazaları Seçin veya Yazın:",
+    "Raporlanacak Mağazaları Seçin:",
     options=varsayilan_magazalar,
     default=varsayilan_magazalar
 )
 
-yuklenen_dosya = st.file_uploader("Excel Dosyanızı Yükleyin", type=['xlsx'])
+yuklenen_dosya = st.file_uploader("Excel Dosyasını Yükleyin", type=['xlsx'])
 
 if yuklenen_dosya is not None:
-    # Excel'i oku
+    # Excel'i oku (İlk 2 satır başlık değil, onları atla)
     df = pd.read_excel(yuklenen_dosya, skiprows=2)
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip() # Sütun isimlerini temizle
 
     if 'Üst Birim' in df.columns:
-        # Seçilen kodlara göre filtrele
-        filtreli_df = df[df['Üst Birim'].isin(secilen_kodlar)]
-        
-        # İlk 17 sütunu al
-        final_df = filtreli_df.iloc[:, :17]
+        # 1. ADIM: "Üst Birim" sütununun kaçıncı sırada olduğunu bul
+        ust_birim_index = df.columns.get_loc('Üst Birim')
 
-        if not final_df.empty:
-            st.write(f"### Sonuç Tablosu ({len(final_df)} Kayıt)")
-            st.dataframe(final_df)
+        # 2. ADIM: Bu indexten başlayarak 17 sütun al (Öncesini otomatik siler)
+        # Örn: Üst Birim 3. sütunsa, 3'ten 20'ye kadar olanları alır
+        final_df = df.iloc[:, ust_birim_index : ust_birim_index + 17]
 
-            # Fotoğraf Dönüştürme
-            if st.button("🖼️ Fotoğraf Olarak İndir"):
-                with st.spinner('Görsel oluşturuluyor...'):
-                    # Görseli oluştur
-                    dfi.export(final_df, 'tablo_cikti.png', table_conversion='chrome')
-                    
-                    with open("tablo_cikti.png", "rb") as file:
-                        st.download_button(
-                            label="Fotoğrafı Kaydet",
-                            data=file,
-                            file_name="magaza_raporu.png",
-                            mime="image/png"
-                        )
-        else:
-            st.warning("Seçilen kodlara ait veri bulunamadı.")
-    else:
-        st.error("Dosyada 'Üst Birim' sütunu bulunamadı. Lütfen doğru dosyayı yüklediğinizden emin olun.")
+        # 3. ADIM: Mağaza kodlarına göre filtrele
+        final_df = final_df[final_df
