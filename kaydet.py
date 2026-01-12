@@ -32,36 +32,24 @@ if yuklenen_dosya is not None:
             if target_sort_col in final_df.columns:
                 final_df = final_df.sort_values(by=target_sort_col, ascending=False)
 
-            # 4. Başlık Satırı Ekleme (Renklendirme için işaretliyoruz)
+            # 4. Başlık Satırı Ekleme
             baslik_satiri = pd.DataFrame(columns=final_df.columns)
             baslik_satiri.loc[0] = [""] * len(final_df.columns)
             baslik_satiri.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ"
             
             report_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
 
-            # --- EKRAN ÖNİZLEMESİ (Biçimlendirilmiş) ---
-            def highlight_rows(row):
-                if row.iloc[0] == "İÇ ANADOLU BÖLGESİ":
-                    return ['background-color: #1f4e78; color: white; font-weight: bold'] * len(row)
-                
-                styles = [''] * len(row)
-                if zayi_oran_col in row.index:
-                    val = row[zayi_oran_col]
-                    # %5.8 kritik eşik (0.058)
-                    if pd.notnull(val) and isinstance(val, (float, int)) and val > 0.058:
-                        idx = row.index.get_loc(zayi_oran_col)
-                        styles[idx] = 'background-color: #ff0000; color: white; font-weight: bold'
-                return styles
-
-            st.write("### Excel Formatlı Önizleme")
-            st.dataframe(report_df.style.apply(highlight_rows, axis=1).format(lambda x: f"{x:.1%}" if isinstance(x, float) and 0 < x < 1 else x))
+            # --- EKRAN ÖNİZLEMESİ ---
+            st.write("### Düzenlenmiş Liste Önizlemesi")
+            st.dataframe(report_df)
 
             col1, col2 = st.columns(2)
 
             with col1:
-                # --- PROFESYONEL EXCEL ÇIKTISI ---
+                # --- PROFESYONEL EXCEL ÇIKTISI (HATA ÇÖZÜMLÜ) ---
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # 'nan_inf_to_errors': True ekleyerek NaN hatalarını engelliyoruz
+                with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
                     report_df.to_excel(writer, index=False, sheet_name='Zayi_Raporu')
                     
                     workbook = writer.book
@@ -73,24 +61,24 @@ if yuklenen_dosya is not None:
                     standard_fmt = workbook.add_format({'border': 1, 'align': 'center'})
                     critical_fmt = workbook.add_format({'bg_color': '#ff0000', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
 
-                    # Sütunları ve Başlıkları Biçimlendir
                     for col_num, value in enumerate(report_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                         worksheet.set_column(col_num, col_num, 15)
 
-                    # Verileri Biçimlendir
                     for row_num in range(1, len(report_df) + 1):
                         row_data = report_df.iloc[row_num-1]
                         for col_num, val in enumerate(row_data):
                             col_name = report_df.columns[col_num]
                             
-                            # Özel Bölge Başlığı Formatı
+                            # NaN kontrolü (Hücre boşsa boş yaz)
+                            if pd.isna(val):
+                                worksheet.write(row_num, col_num, "", standard_fmt)
+                                continue
+
                             if row_data.iloc[0] == "İÇ ANADOLU BÖLGESİ":
                                 worksheet.write(row_num, col_num, val, header_fmt)
-                            # Zayi Oranı Kritik Formatı
-                            elif col_name == zayi_oran_col and pd.notnull(val) and val > 0.058:
+                            elif col_name == zayi_oran_col and val > 0.058:
                                 worksheet.write(row_num, col_num, val, critical_fmt)
-                            # Genel Yüzde Formatı
                             elif 'Oran' in col_name or 'Hedef' in col_name:
                                 worksheet.write(row_num, col_num, val, percent_fmt)
                             else:
@@ -99,7 +87,7 @@ if yuklenen_dosya is not None:
                 st.download_button("📥 Renkli Excel İndir", output.getvalue(), "ic_anadolu_renkli.xlsx")
 
             with col2:
-                # --- PROFESYONEL PDF ÇIKTISI ---
+                # --- PDF ÇIKTISI ---
                 try:
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
                     pdf.add_page()
@@ -111,17 +99,15 @@ if yuklenen_dosya is not None:
                     
                     for i, row in report_df.iterrows():
                         is_header = row.iloc[0] == "İÇ ANADOLU BÖLGESİ"
-                        
                         for col_idx, item in enumerate(row):
                             col_name = report_df.columns[col_idx]
                             val = str(item) if pd.notna(item) else ""
                             
-                            # PDF Renklendirme Mantığı
                             if is_header:
-                                pdf.set_fill_color(31, 78, 120) # Lacivert
+                                pdf.set_fill_color(31, 78, 120)
                                 pdf.set_text_color(255, 255, 255)
                             elif col_name == zayi_oran_col and isinstance(item, (float, int)) and item > 0.058:
-                                pdf.set_fill_color(255, 0, 0) # Kırmızı
+                                pdf.set_fill_color(255, 0, 0)
                                 pdf.set_text_color(255, 255, 255)
                             else:
                                 pdf.set_fill_color(255, 255, 255)
@@ -133,8 +119,7 @@ if yuklenen_dosya is not None:
                             pdf.cell(col_width, 7, val[:12], border=1, fill=True, align='C')
                         pdf.ln()
 
-                    pdf_bytes = bytes(pdf.output())
-                    st.download_button("📥 Renkli PDF İndir", pdf_bytes, "ic_anadolu_renkli.pdf")
+                    st.download_button("📥 Renkli PDF İndir", bytes(pdf.output()), "ic_anadolu_renkli.pdf")
                 except Exception as e:
                     st.error(f"PDF Hatası: {e}")
 
