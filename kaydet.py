@@ -1,74 +1,89 @@
 import streamlit as st
 import pandas as pd
 import dataframe_image as dfi
+import os
 
+# Sayfa ayarları
 st.set_page_config(page_title="Rapor Oluşturucu", layout="wide")
 
-st.title("📊 Satır Arası Başlıklı Cam Zayi Raporu")
+st.title("📊 Profesyonel Cam Zayi Raporu")
 
-yuklenen_dosya = st.file_uploader("Excel Dosyasını Yükleyin", type=['xlsx'])
+# Gerekli fonksiyon: Renklendirme
+def kirmizi_kutucuk(val):
+    if isinstance(val, (int, float)) and val > 0.058:
+        return 'background-color: #e74c3c; color: white; font-weight: bold'
+    return ''
+
+yuklenen_dosya = st.file_uploader("Excel Dosyanızı Yükleyin", type=['xlsx'])
 
 if yuklenen_dosya is not None:
     try:
-        # 1. Ham veriyi oku (3. satır başlık - İndeks 2)
-        df_full = pd.read_excel(yuklenen_dosya, header=2)
+        # 1. DOSYAYI OKU: İlk 2 satırı atla, 3. satırı başlık yap
+        df = pd.read_excel(yuklenen_dosya, skiprows=2)
         
-        # 2. Üst Birim'den itibaren 17 sütunu al
-        ust_birim_idx = df_full.columns.get_loc('Üst Birim')
-        df = df_full.iloc[:, ust_birim_idx : ust_birim_idx + 17].copy()
+        # Sütun isimlerindeki boşlukları temizle (Hata almamak için kritik)
         df.columns = [str(c).strip() for c in df.columns]
 
-        # 3. SATIR AYARLARI (Excel 26-43 aralığı)
-        # Excel 26. satır -> df indeksi 23
-        # Excel 40. satır -> df indeksi 37
-        ust_kisim = df.iloc[23:37].copy() # 26'dan 39'a kadar olan mağazalar
-        alt_kisim = df.iloc[38:41].copy() # 41'den 43'e kadar olan mağazalar
-
-        # 4. ARA BAŞLIK SATIRI OLUŞTURMA (40. satır yerine)
-        ara_baslik = pd.DataFrame(index=[37], columns=df.columns)
-        ara_baslik.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ" # İlk hücreye yaz
-        # Diğer hücreleri boş bırak (birleşmiş görünecek)
-        ara_baslik.fillna("", inplace=True)
-
-        # 5. Tabloları Birleştir
-        final_df = pd.concat([ust_kisim, ara_baslik, alt_kisim])
-
-        # --- GÖRSEL STİL ---
-        def stil_uygula(row):
-            styles = [''] * len(row)
-            # Eğer satır bizim ara başlığımızsa (İç Anadolu yazıyorsa)
-            if row['Üst Birim'] == "İÇ ANADOLU BÖLGESİ":
-                return ['background-color: #2c3e50; color: white; font-weight: bold; text-align: center'] * len(row)
+        # 2. SATIR VE SÜTUN AYIKLAMA
+        # Excel 26. satır -> Python df içinde 23. satıra denk gelir
+        # Üst Birim sütunundan itibaren 17 sütun al
+        if 'Üst Birim' in df.columns:
+            baslangic_idx = df.columns.get_loc('Üst Birim')
             
-            # Normal satırlar için oran kontrolü (%5.8 üzeri kırmızı)
-            val = row.get('Toplam Cam Zayi Oranı', 0)
-            if isinstance(val, (int, float)) and val > 0.058:
-                # Sadece o hücreyi kırmızı yap (indeksini bulmamız lazım)
-                idx = list(row.index).index('Toplam Cam Zayi Oranı')
-                styles[idx] = 'background-color: #e74c3c; color: white; font-weight: bold'
+            # 26-39. satırlar (Üst kısım)
+            ust_df = df.iloc[23:37, baslangic_idx : baslangic_idx + 17].copy()
             
-            return styles
+            # 41-43. satırlar (Alt kısım)
+            alt_df = df.iloc[38:41, baslangic_idx : baslangic_idx + 17].copy()
 
-        oran_cols = [c for c in final_df.columns if 'Oran' in str(c) or 'Hedef' in str(c)]
-        
-        styled_df = final_df.style.format({c: "{:.1%}" for c in oran_cols if c in final_df.columns}, na_rep="")\
-            .apply(stil_uygula, axis=1)\
-            .set_properties(**{
-                'text-align': 'center',
-                'font-size': '12px',
-                'border': '1px solid #ddd',
-                'white-space': 'nowrap'
-            })\
-            .hide(axis="index")
+            # 3. ARA BAŞLIK SATIRI (40. satır yerine)
+            ara_baslik = pd.DataFrame(columns=ust_df.columns)
+            ara_baslik.loc[0] = [""] * len(ust_df.columns)
+            ara_baslik.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ" # İlk hücreye yaz
 
-        st.write("### Tablo Önizlemesi (40. Satır Başlık Yapıldı)")
-        st.write(styled_df)
+            # Hepsini birleştir
+            final_df = pd.concat([ust_df, ara_baslik, alt_df], ignore_index=True)
 
-        if st.button("🖼️ Fotoğraf Olarak İndir"):
-            resim = "ara_baslikli_rapor.png"
-            dfi.export(styled_df, resim, table_conversion='chrome')
-            with open(resim, "rb") as f:
-                st.download_button("Resmi Kaydet", f, "rapor.png", "image/png")
+            # 4. GÖRSEL STİL VE BİÇİMLENDİRME
+            oran_cols = [c for c in final_df.columns if 'Oran' in c or 'Hedef' in c]
+            
+            # Tabloyu özelleştir
+            styled_df = final_df.style.format({c: "{:.1%}" for c in oran_cols}, na_rep="")
+            
+            # %5.8 üzeri kırmızı yap (Sütun adı tam eşleşmeli)
+            target_col = 'Toplam Cam Zayi Oranı'
+            if target_col in final_df.columns:
+                styled_df = styled_df.applymap(kirmizi_kutucuk, subset=[target_col])
+
+            # Ara başlığı renklendir (Satır bazlı kontrol)
+            def satir_stili(row):
+                if row.iloc[0] == "İÇ ANADOLU BÖLGESİ":
+                    return ['background-color: #2c3e50; color: white; font-weight: bold'] * len(row)
+                return [''] * len(row)
+            
+            styled_df = styled_df.apply(satir_stili, axis=1)\
+                .set_properties(**{
+                    'text-align': 'center',
+                    'font-size': '12px',
+                    'border': '1px solid #ddd',
+                    'white-space': 'nowrap'
+                })\
+                .hide(axis="index")
+
+            st.write("### Tablo Önizlemesi")
+            st.write(styled_df)
+
+            # 5. FOTOĞRAF OLARAK İNDİR
+            if st.button("🖼️ Fotoğraf Olarak İndir"):
+                with st.spinner('Resim hazırlanıyor...'):
+                    # Geçici dosya adı
+                    resim_yolu = "cikti_rapor.png"
+                    dfi.export(styled_df, resim_yolu)
+                    
+                    with open(resim_yolu, "rb") as file:
+                        st.download_button("Resmi Kaydet", file, "rapor.png", "image/png")
+        else:
+            st.error("Hata: 'Üst Birim' sütunu bulunamadı. Lütfen Excel başlıklarını kontrol edin.")
 
     except Exception as e:
-        st.error(f"Hata: {e}")
+        st.error(f"Sistemsel bir hata oluştu: {e}")
