@@ -3,45 +3,46 @@ import pandas as pd
 import dataframe_image as dfi
 import os
 
-# Sayfa başlığı
-st.set_page_config(page_title="Excel Bölge Ayıklayıcı", layout="wide")
-st.title("📍 İç Anadolu Mağaza Raporlayıcı")
+st.set_page_config(page_title="Mağaza Koduna Göre Rapor", layout="wide")
+st.title("📊 Özel Mağaza Analiz Raporu")
 
-# 1. Dosya Yükleme Alanı
-yuklenen_dosya = st.file_uploader("Excel Dosyasını Buraya Bırakın", type=['xlsx', 'csv'])
+# İstediğin mağaza kodlarını bir liste olarak tanımlayalım
+hedef_magazalar = ["M38001", "M38003"]
+
+yuklenen_dosya = st.file_uploader("Excel Dosyasını Yükleyin", type=['xlsx', 'csv'])
 
 if yuklenen_dosya is not None:
-    # Excel'i oku (Senin dosyanın formatına göre ilk 2 satırı atlıyoruz)
+    # Excel'i oku (İlk 2 satırı atla, 3. satırı başlık yap)
     df = pd.read_excel(yuklenen_dosya, skiprows=2)
-    
-    # Sütun isimlerini temizle (Başlardaki ve sonlardaki boşlukları siler)
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip() # Sütun isimlerindeki boşlukları temizle
 
-    # 2. İç Anadolu Filtrelemesi
-    if 'Bölge' in df.columns:
-        # Sadece "İÇ ANADOLU" olanları al
-        filtreli_df = df[df['Bölge'].str.contains('İÇ ANADOLU', na=False, case=False)]
+    # 1. Mağaza Koduna (Üst Birim sütununa) göre filtrele
+    # 'isin' fonksiyonu listedeki kodların tamamını arar
+    if 'Üst Birim' in df.columns:
+        filtreli_df = df[df['Üst Birim'].isin(hedef_magazalar)]
         
-        # 3. İlk 17 Sütunu Seç
+        # 2. İlk 17 Sütunu Seç
         final_df = filtreli_df.iloc[:, :17]
 
-        st.success(f"İç Anadolu bölgesine ait {len(final_df)} mağaza bulundu!")
-        st.write("Önizleme (İlk 17 Sütun):")
-        st.dataframe(final_df)
+        if not final_df.empty:
+            st.success(f"Seçilen {len(final_df)} mağaza bulundu.")
+            st.table(final_df) # Önizleme için tabloyu göster
 
-        # 4. Fotoğraf Olarak İndirme Butonu
-        if st.button("Tabloyu Fotoğrafa Dönüştür"):
-            with st.spinner('Resim oluşturuluyor...'):
-                resim_adi = "ic_anadolu_rapor.png"
-                # Tabloyu resme çevirme işlemi
-                dfi.export(final_df, resim_adi)
-                
-                with open(resim_adi, "rb") as file:
-                    st.download_button(
-                        label="🖼️ Fotoğrafı İndir",
-                        data=file,
-                        file_name="ic_anadolu_magaza_listesi.png",
-                        mime="image/png"
-                    )
+            # 3. Fotoğraf Oluşturma
+            if st.button("Fotoğraf Olarak İndir"):
+                with st.spinner('Fotoğraf hazırlanıyor...'):
+                    resim_yolu = "magaza_rapor.png"
+                    # Tabloyu resme dönüştür
+                    dfi.export(final_df, resim_yolu)
+                    
+                    with open(resim_yolu, "rb") as file:
+                        st.download_button(
+                            label="🖼️ Fotoğrafı Kaydet",
+                            data=file,
+                            file_name="ozel_magaza_raporu.png",
+                            mime="image/png"
+                        )
+        else:
+            st.warning("Belirlediğiniz mağaza kodları dosyada bulunamadı. Lütfen kodları kontrol edin.")
     else:
-        st.error("Hata: Dosyada 'Bölge' isimli bir sütun bulunamadı!")
+        st.error("Hata: Dosyada 'Üst Birim' (mağaza kodu) sütunu bulunamadı!")
