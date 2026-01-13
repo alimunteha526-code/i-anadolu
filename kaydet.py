@@ -20,13 +20,16 @@ st.markdown("""
     h1 { color: #333333; font-family: 'Arial Black', sans-serif; text-align: center; }
     .stButton>button { width: 100%; background-color: #333333 !important; color: white !important; font-weight: bold; border-radius: 10px !important; height: 3.5em; }
     .stDownloadButton>button { background-color: #007bff !important; color: white !important; border-radius: 10px !important; }
-    .reset-button>button { background-color: #dc3545 !important; } /* Sıfırla butonu için kırmızı ton */
+    /* Sıfırla butonu için özel kırmızı stil */
+    div[data-testid="stColumn"]:nth-child(2) .stButton>button {
+        background-color: #d32f2f !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown("<h1>👓 ATASUN OPTİK</h1>", unsafe_allow_html=True)
 
-# Session State Hazırlığı
+# --- SESSION STATE (BELLEK) YÖNETİMİ ---
 if 'db' not in st.session_state:
     st.session_state.db = pd.DataFrame(columns=['Sipariş No', 'Müşteri Adı', 'Personel No'])
 if 'okutulanlar' not in st.session_state:
@@ -34,11 +37,13 @@ if 'okutulanlar' not in st.session_state:
 
 # --- 1. ADIM: DOSYA YÜKLEME ---
 with st.expander("📁 Sipariş Listesi Yükle (Excel veya ODS)", expanded=st.session_state.db.empty):
-    yuklenen_dosya = st.file_uploader("Dosya seçiniz", type=None)
+    # MIME tipi kısıtlamasını aşmak için type=None yapıldı
+    yuklenen_dosya = st.file_uploader("Dosyayı seçin veya sürükleyin", type=None)
     
     if yuklenen_dosya:
         try:
-            if yuklenen_dosya.name.endswith('.ods'):
+            # Uzantıya göre okuma motoru seçimi
+            if yuklenen_dosya.name.lower().endswith('.ods'):
                 df_temp = pd.read_excel(yuklenen_dosya, engine='odf')
             else:
                 df_temp = pd.read_excel(yuklenen_dosya)
@@ -49,48 +54,52 @@ with st.expander("📁 Sipariş Listesi Yükle (Excel veya ODS)", expanded=st.se
             s_isim_col = c2.selectbox("Müşteri Adı", df_temp.columns)
             s_pers_col = c3.selectbox("Personel No", df_temp.columns)
             
-            if st.button("Listeye Ekle"):
+            if st.button("Listeye Ekle / Güncelle"):
                 yeni_veri = df_temp[[s_no_col, s_isim_col, s_pers_col]].copy()
                 yeni_veri.columns = ['Sipariş No', 'Müşteri Adı', 'Personel No']
+                
+                # Temizlik
                 yeni_veri['Sipariş No'] = yeni_veri['Sipariş No'].astype(str).str.strip().str.upper()
                 yeni_veri['Personel No'] = pd.to_numeric(yeni_veri['Personel No'], errors='coerce').fillna(0).astype(int).astype(str)
                 
-                birlesik_df = pd.concat([st.session_state.db, yeni_veri]).drop_duplicates(subset=['Sipariş No'], keep='last')
-                st.session_state.db = birlesik_df
-                st.success(f"✅ Liste güncellendi. Toplam: {len(st.session_state.db)}")
+                # Mevcut veriye ekleme ve tekrarları silme
+                st.session_state.db = pd.concat([st.session_state.db, yeni_veri]).drop_duplicates(subset=['Sipariş No'], keep='last')
+                st.success(f"✅ Başarılı! Toplam kayıt sayısı: {len(st.session_state.db)}")
         except Exception as e:
-            st.error(f"Dosya okuma hatası: {e}")
+            st.error(f"Dosya yüklenirken bir hata oluştu: {e}")
 
 st.divider()
 
 # --- 2. ADIM: BARKOD OKUTMA ---
 if not st.session_state.db.empty:
     with st.form(key='barkod_form', clear_on_submit=True):
-        input_kod = st.text_input("📲 Barkodu Okutun").strip().upper()
+        st.markdown("### 📲 Barkod Okutma")
+        input_kod = st.text_input("Barkodu okutun ve Sorgula'ya basın", placeholder="...").strip().upper()
         submit = st.form_submit_button("SORGULA")
 
     if submit and input_kod:
         match = st.session_state.db[st.session_state.db['Sipariş No'] == input_kod]
         if not match.empty:
             isim = match['Müşteri Adı'].iloc[0]
-            st.success(f"✅ DOĞRU: {isim}")
+            st.success(f"✅ EŞLEŞTİ: {isim}")
             st.session_state.okutulanlar.add(input_kod)
         else:
-            st.error(f"❌ LİSTEDE YOK: {input_kod}")
+            st.error(f"❌ KAYIT BULUNAMADI: {input_kod}")
 
-# --- 3. ADIM: RAPORLAMA VE SIFIRLAMA BUTONLARI ---
+# --- 3. ADIM: RAPORLAMA VE PANELİ SIFIRLA ---
 st.divider()
-col_rapor, col_sifirla = st.columns(2)
+col_aksiyon1, col_aksiyon2 = st.columns(2)
 
-with col_rapor:
+with col_aksiyon1:
     btn_eksik = st.button("📊 Eksikleri Listele")
 
-with col_sifirla:
+with col_aksiyon2:
     if st.button("🔄 Paneli Sıfırla"):
         st.session_state.db = pd.DataFrame(columns=['Sipariş No', 'Müşteri Adı', 'Personel No'])
         st.session_state.okutulanlar = set()
         st.rerun()
 
+# Eksik listesi tetiklendiğinde
 if btn_eksik:
     eksik_df = st.session_state.db[~st.session_state.db['Sipariş No'].isin(st.session_state.okutulanlar)].copy()
     
@@ -99,34 +108,47 @@ if btn_eksik:
         st.markdown("### 📋 EKSİK SİPARİŞ LİSTESİ")
         st.dataframe(eksik_df, use_container_width=True, hide_index=True)
         
-        st.markdown("#### 📥 Listeyi İndir")
-        download_col1, download_col2 = st.columns(2)
+        st.markdown("#### 📥 Farklı Formatta İndir")
+        d_col1, d_col2 = st.columns(2)
 
-        # --- PDF OLARAK İNDİR ---
-        with download_col1:
+        # PDF İndirme (Hata Giderilmiş Versiyon)
+        with d_col1:
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", 'B', 14)
             pdf.cell(190, 10, "EKSIK SIPARIS LISTESI", ln=True, align='C')
             pdf.set_font("Arial", size=10)
             pdf.ln(5)
+            # Tablo Başlıkları
             pdf.cell(15, 8, "Sira", 1); pdf.cell(45, 8, "Siparis No", 1); pdf.cell(90, 8, "Musteri Adi", 1); pdf.cell(30, 8, "Pers. No", 1); pdf.ln()
-            for i, r in eksik_df.iterrows():
-                isim_temiz = str(r['Müşteri Adı']).replace('İ','I').replace('ğ','g').replace('ü','u').replace('ş','s').replace('ö','o').replace('ç','c').replace('Ğ','G').replace('Ü','U').replace('Ş','S').replace('Ö','O').replace('Ç','C')
+            # Veriler
+            for _, r in eksik_df.iterrows():
+                # Latin-1 uyumluluğu için Türkçe karakter değişimi
+                ad_pdf = str(r['Müşteri Adı']).translate(str.maketrans("İıĞğÜüŞşÖöÇç", "IiGgUuSsOoCc"))
                 pdf.cell(15, 8, str(r['Sıra No']), 1)
                 pdf.cell(45, 8, str(r['Sipariş No']), 1)
-                pdf.cell(90, 8, isim_temiz[:40], 1)
+                pdf.cell(90, 8, ad_pdf[:40], 1)
                 pdf.cell(30, 8, str(r['Personel No']), 1)
                 pdf.ln()
-            pdf_output = pdf.output(dest='S').encode('latin-1', 'replace')
-            st.download_button("📄 PDF İndir", data=pdf_output, file_name="eksik_liste.pdf", mime="application/pdf")
+            
+            # FPDF2 için en güvenli bayt çıktısı
+            pdf_bytes = pdf.output()
+            if isinstance(pdf_bytes, str): # Eğer eski sürüm fpdf ise
+                pdf_bytes = pdf_bytes.encode('latin-1', 'replace')
+                
+            st.download_button("📄 PDF Olarak İndir", data=pdf_bytes, file_name="eksik_liste.pdf", mime="application/pdf")
 
-        # --- ODS OLARAK İNDİR ---
-        with download_col2:
-            output_ods = io.BytesIO()
-            with pd.ExcelWriter(output_ods, engine='odf') as writer:
-                eksik_df.to_excel(writer, index=False, sheet_name='Eksikler')
-            st.download_button("📂 ODS İndir", data=output_ods.getvalue(), file_name="eksik_liste.ods", mime="application/vnd.oasis.opendocument.spreadsheet")
+        # ODS İndirme
+        with d_col2:
+            ods_buffer = io.BytesIO()
+            with pd.ExcelWriter(ods_buffer, engine='odf') as writer:
+                eksik_df.to_excel(writer, index=False, sheet_name='Eksik_Siparisler')
+            
+            st.download_button("📂 ODS Olarak İndir", data=ods_buffer.getvalue(), file_name="eksik_liste.ods", mime="application/vnd.oasis.opendocument.spreadsheet")
             
     else:
-        st.success("Tüm siparişler tamamlanmış, eksik yok!")
+        st.success("Harika! Tüm siparişler okutulmuş, eksik liste boş.")
+
+# Alt Bilgi
+if not st.session_state.db.empty:
+    st.markdown(f"<p style='text-align:center; color:gray;'>Sistemde {len(st.session_state.db)} kayıt var | {len(st.session_state.okutulanlar)} adet okutuldu.</p>", unsafe_allow_html=True)
