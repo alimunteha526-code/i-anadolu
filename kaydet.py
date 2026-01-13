@@ -3,127 +3,121 @@ import pandas as pd
 import io
 from fpdf import FPDF
 
-st.set_page_config(page_title="Zayi Düzenleme Paneli", layout="wide")
-st.title("📋 İÇ ANADOLU AEL ZAYİ LİSTESİ DÜZENLEME PANELİ")
+# --- SAYFA YAPILANDIRMASI ---
+st.set_page_config(page_title="Atasun Optik - Takip Paneli", layout="centered")
 
-def tr_to_en(text):
-    if not isinstance(text, str): return text
-    mapping = {"İ": "I", "ı": "i", "Ş": "S", "ş": "s", "Ğ": "G", "ğ": "g", "Ç": "C", "ç": "c", "Ö": "O", "ö": "o", "Ü": "U", "ü": "u"}
-    for tr, en in mapping.items(): text = text.replace(tr, en)
-    return text
+# --- ATASUN KURUMSAL TASARIM (CSS) ---
+st.markdown("""
+    <style>
+    .stApp { background-color: #FF671B; }
+    .block-container {
+        background-color: white;
+        padding: 3rem;
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        margin-top: 2rem;
+    }
+    h1 { color: #333333; font-family: 'Arial Black', sans-serif; text-align: center; }
+    .stButton>button { width: 100%; background-color: #333333 !important; color: white !important; font-weight: bold; border-radius: 10px !important; height: 3.5em; }
+    .stDownloadButton>button { background-color: #007bff !important; color: white !important; border-radius: 10px !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-yuklenen_dosya = st.file_uploader("Excel Dosyasını Buraya Yükleyin", type=['xlsx'])
+st.markdown("<h1>👓 ATASUN OPTİK</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; font-weight:bold; color:#666;'>Açık Kapora Takip Paneli</p>", unsafe_allow_html=True)
 
-if yuklenen_dosya is not None:
-    try:
-        df_full = pd.read_excel(yuklenen_dosya, header=2)
-        df_full.columns = [str(c).strip() for c in df_full.columns]
+if 'db' not in st.session_state:
+    st.session_state.db = pd.DataFrame()
+    st.session_state.okutulanlar = set()
 
-        target_sort_col = 'Net Satış Miktarı (Cam)'
-        zayi_oran_col = 'Toplam Cam Zayi Oranı'
+# --- 1. ADIM: EXCEL YÜKLEME ---
+with st.expander("📁 Ana Sipariş Listesini Yükle", expanded=True):
+    yuklenen_dosya = st.file_uploader("", type=['xlsx'])
+    if yuklenen_dosya:
+        df_temp = pd.read_excel(yuklenen_dosya)
+        c1, c2, c3 = st.columns(3)
+        s_no_col = c1.selectbox("Sipariş No", df_temp.columns)
+        s_isim_col = c2.selectbox("Müşteri Adı", df_temp.columns)
+        s_pers_col = c3.selectbox("Personel No", df_temp.columns)
+        
+        db_df = df_temp[[s_no_col, s_isim_col, s_pers_col]].copy()
+        db_df.columns = ['Sipariş No', 'Müşteri Adı', 'Personel No']
+        
+        # Sayısal temizlik ve metne dönüştürme (Karakter hatasını önlemek için)
+        db_df['Personel No'] = pd.to_numeric(db_df['Personel No'], errors='coerce').fillna(0).astype(int).astype(str)
+        db_df['Sipariş No'] = db_df['Sipariş No'].astype(str).str.strip().str.upper()
+        
+        st.session_state.db = db_df
+        st.success(f"✅ {len(st.session_state.db)} Kayıt Yüklendi.")
 
-        if 'Üst Birim' in df_full.columns:
-            start_col = df_full.columns.get_loc('Üst Birim')
-            final_df = df_full.iloc[22:40, start_col : start_col + 17].copy()
+st.divider()
 
-            # Veri Temizleme ve Sıralama
-            numeric_cols = [c for c in final_df.columns if any(x in str(c) for x in ['Oran', 'Hedef', 'Miktarı', 'Adet'])]
-            for col in numeric_cols:
-                final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
+# --- 2. ADIM: BARKOD OKUTMA ---
+if not st.session_state.db.empty:
+    with st.form(key='barkod_form', clear_on_submit=True):
+        st.markdown("### 📲 Barkodu Okutun")
+        input_kod = st.text_input("", placeholder="Barkodu okutun...").strip().upper()
+        submit = st.form_submit_button("SORGULA")
 
-            if target_sort_col in final_df.columns:
-                final_df = final_df.sort_values(by=target_sort_col, ascending=False)
+    if submit and input_kod:
+        match = st.session_state.db[st.session_state.db['Sipariş No'] == input_kod]
+        if not match.empty:
+            isim = match['Müşteri Adı'].iloc[0]
+            st.success(f"✅ DOĞRU: {isim}")
+            st.session_state.okutulanlar.add(input_kod)
+        else:
+            st.error(f"❌ LİSTEDE YOK: {input_kod}")
 
-            # BAŞLIK SATIRI EKLEME (Birleştirilecek satır)
-            baslik_satiri = pd.DataFrame(columns=final_df.columns)
-            baslik_satiri.loc[0] = [""] * len(final_df.columns)
-            baslik_satiri.iloc[0, 0] = "İÇ ANADOLU BÖLGESİ" # İlk hücreye yazıyoruz, Excel'de birleştireceğiz
+# --- 3. ADIM: RAPORLAMA VE İNDİRME ---
+st.divider()
+if st.button("📊 Eksikleri Listele"):
+    eksik_df = st.session_state.db[~st.session_state.db['Sipariş No'].isin(st.session_state.okutulanlar)].copy()
+    
+    if not eksik_df.empty:
+        eksik_df.insert(0, 'Sıra No', range(1, len(eksik_df) + 1))
+        st.markdown("### 📋 EKSİK SİPARİŞ LİSTESİ")
+        st.dataframe(eksik_df, use_container_width=True, hide_index=True)
+        
+        col_pdf, col_csv = st.columns(2)
+        
+        # --- PDF İNDİRME ---
+        with col_pdf:
+            pdf = FPDF()
+            pdf.add_page()
+            # PDF için font ayarı (Standard fontlarda Türkçe karakter kısıtlıdır, bu yüzden replace kullanılır)
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(190, 10, "EKSIK SIPARIS LISTESI", ln=True, align='C')
+            pdf.set_font("Arial", size=10)
+            pdf.ln(5)
+            # Başlıklar
+            pdf.cell(15, 8, "Sira", 1)
+            pdf.cell(45, 8, "Siparis No", 1)
+            pdf.cell(90, 8, "Musteri Adi", 1)
+            pdf.cell(30, 8, "Pers. No", 1)
+            pdf.ln()
+            # Satırlar
+            for i, r in eksik_df.iterrows():
+                # Karakterleri PDF'in anlayacağı dile çeviriyoruz
+                isim_pdf = str(r['Müşteri Adı']).replace('İ','I').replace('ğ','g').replace('ü','u').replace('ş','s').replace('ö','o').replace('ç','c').replace('Ğ','G').replace('Ü','U').replace('Ş','S').replace('Ö','O').replace('Ç','C')
+                pdf.cell(15, 8, str(r['Sıra No']), 1)
+                pdf.cell(45, 8, str(r['Sipariş No']), 1)
+                pdf.cell(90, 8, isim_pdf[:40], 1)
+                pdf.cell(30, 8, str(r['Personel No']), 1)
+                pdf.ln()
             
-            report_df = pd.concat([baslik_satiri, final_df], ignore_index=True)
+            pdf_bytes = pdf.output(dest='S').encode('latin-1')
+            st.download_button("📄 PDF İndir", data=pdf_bytes, file_name="Eksik_Siparis_Listesi.pdf", mime="application/pdf")
 
-            st.write("### Önizleme")
-            st.dataframe(report_df)
+        # --- CSV İNDİRME (Karakter Sorununu Çözen Kısım) ---
+        with col_csv:
+            # utf-8-sig: Excel'in Türkçe karakterleri tanımasını sağlayan en önemli koddur.
+            csv_data = eksik_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+            st.download_button("📂 CVS İndir", data=csv_data, file_name="Eksik_Siparis_Listesi.csv", mime="text/csv")
+            
+    else:
+        st.success("Tüm siparişler tamamlanmış!")
 
-            col1, col2 = st.columns(2)
+if st.button("🔄 Paneli Sıfırla"):
+    st.session_state.okutulanlar = set()
+    st.rerun()
 
-            with col1:
-                # --- EXCEL ÇIKTISI (HÜCRE BİRLEŞTİRMELİ) ---
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
-                    report_df.to_excel(writer, index=False, sheet_name='Zayi_Raporu')
-                    workbook = writer.book
-                    worksheet = writer.sheets['Zayi_Raporu']
-
-                    # Formatlar
-                    merge_fmt = workbook.add_format({'bg_color': '#1f4e78', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center', 'valign': 'vcenter'})
-                    header_fmt = workbook.add_format({'bg_color': '#1f4e78', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center'})
-                    percent_fmt = workbook.add_format({'num_format': '0.0%', 'border': 1, 'align': 'center'})
-                    critical_fmt = workbook.add_format({'bg_color': '#FF0000', 'font_color': 'white', 'bold': True, 'border': 1, 'align': 'center', 'num_format': '0.0%'})
-                    standard_fmt = workbook.add_format({'border': 1, 'align': 'center'})
-
-                    # 1. SATIRIN İLK İKİ HÜCRESİNİ BİRLEŞTİR
-                    worksheet.merge_range(1, 0, 1, 1, "İÇ ANADOLU BÖLGESİ", merge_fmt)
-                    # Satırın geri kalanını lacivert yap
-                    for c in range(2, len(report_df.columns)):
-                        worksheet.write(1, c, "", merge_fmt)
-
-                    # Başlıkları ve Sütunları Ayarla
-                    for col_num, value in enumerate(report_df.columns):
-                        worksheet.write(0, col_num, value, header_fmt)
-                        worksheet.set_column(col_num, col_num, 18)
-
-                    # Verileri Yaz (2. satırdan başlayarak)
-                    for row_num in range(2, len(report_df) + 1):
-                        row_data = report_df.iloc[row_num-1]
-                        for col_num, val in enumerate(row_data):
-                            col_name = report_df.columns[col_num]
-                            if col_name == zayi_oran_col and pd.notnull(val) and val > 0.058:
-                                worksheet.write(row_num, col_num, val, critical_fmt)
-                            elif 'Oran' in col_name or 'Hedef' in col_name:
-                                worksheet.write(row_num, col_num, val, percent_fmt)
-                            else:
-                                worksheet.write(row_num, col_num, val if pd.notnull(val) else "", standard_fmt)
-
-                st.download_button("📥 Birleştirilmiş Excel İndir", output.getvalue(), "ic_anadolu_ozel.xlsx")
-
-            with col2:
-                # --- PDF ÇIKTISI ---
-                try:
-                    pdf = FPDF(orientation='L', unit='mm', format='A4')
-                    pdf.add_page()
-                    pdf.set_font("Helvetica", "B", 10)
-                    pdf.set_fill_color(31, 78, 120)
-                    pdf.set_text_color(255, 255, 255)
-                    
-                    col_width = pdf.epw / len(report_df.columns)
-                    
-                    # PDF Başlık Satırı (Görsel Birleştirme)
-                    pdf.cell(col_width * 2, 8, "IC ANADOLU BOLGESI", border=1, fill=True, align='C')
-                    pdf.cell(col_width * (len(report_df.columns) - 2), 8, "", border=1, fill=True)
-                    pdf.ln()
-
-                    pdf.set_font("Helvetica", size=6)
-                    pdf.set_text_color(0, 0, 0)
-
-                    for i, row in report_df.iloc[1:].iterrows():
-                        for col_idx, item in enumerate(row):
-                            col_name = report_df.columns[col_idx]
-                            val = tr_to_en(str(item)) if pd.notna(item) else ""
-                            
-                            if col_name == zayi_oran_col and isinstance(item, (float, int)) and item > 0.058:
-                                pdf.set_fill_color(255, 0, 0)
-                                pdf.set_text_color(255, 255, 255)
-                            else:
-                                pdf.set_fill_color(255, 255, 255)
-                                pdf.set_text_color(0, 0, 0)
-
-                            if isinstance(item, float) and 0 < item < 1: val = f"{item:.1%}"
-                            pdf.cell(col_width, 7, val[:12], border=1, fill=True, align='C')
-                        pdf.ln()
-
-                    st.download_button("📥 PDF Olarak İndir", bytes(pdf.output()), "ic_anadolu_rapor.pdf")
-                except Exception as e:
-                    st.error(f"PDF Hatası: {e}")
-
-    except Exception as e:
-        st.error(f"Sistem Hatası: {e}")
