@@ -19,6 +19,8 @@ st.markdown("""
     }
     h1 { color: #333333; font-family: 'Arial Black', sans-serif; text-align: center; }
     .stButton>button { width: 100%; background-color: #333333 !important; color: white !important; font-weight: bold; border-radius: 10px !important; height: 3.5em; }
+    .stDownloadButton>button { background-color: #007bff !important; color: white !important; border-radius: 10px !important; }
+    .reset-button>button { background-color: #dc3545 !important; } /* Sıfırla butonu için kırmızı ton */
     </style>
     """, unsafe_allow_html=True)
 
@@ -32,12 +34,10 @@ if 'okutulanlar' not in st.session_state:
 
 # --- 1. ADIM: DOSYA YÜKLEME ---
 with st.expander("📁 Sipariş Listesi Yükle (Excel veya ODS)", expanded=st.session_state.db.empty):
-    # 'type' kısıtlamasını kaldırarak MIME tipi hatalarını bypass ediyoruz
-    yuklenen_dosya = st.file_uploader("Dosya seçiniz (.xlsx veya .ods)", type=None)
+    yuklenen_dosya = st.file_uploader("Dosya seçiniz", type=None)
     
     if yuklenen_dosya:
         try:
-            # Dosya uzantısına göre uygun motoru seçiyoruz
             if yuklenen_dosya.name.endswith('.ods'):
                 df_temp = pd.read_excel(yuklenen_dosya, engine='odf')
             else:
@@ -52,12 +52,9 @@ with st.expander("📁 Sipariş Listesi Yükle (Excel veya ODS)", expanded=st.se
             if st.button("Listeye Ekle"):
                 yeni_veri = df_temp[[s_no_col, s_isim_col, s_pers_col]].copy()
                 yeni_veri.columns = ['Sipariş No', 'Müşteri Adı', 'Personel No']
-                
-                # Veri Temizleme
                 yeni_veri['Sipariş No'] = yeni_veri['Sipariş No'].astype(str).str.strip().str.upper()
                 yeni_veri['Personel No'] = pd.to_numeric(yeni_veri['Personel No'], errors='coerce').fillna(0).astype(int).astype(str)
                 
-                # Birleştirme ve Mükerrer Kontrolü
                 birlesik_df = pd.concat([st.session_state.db, yeni_veri]).drop_duplicates(subset=['Sipariş No'], keep='last')
                 st.session_state.db = birlesik_df
                 st.success(f"✅ Liste güncellendi. Toplam: {len(st.session_state.db)}")
@@ -81,19 +78,55 @@ if not st.session_state.db.empty:
         else:
             st.error(f"❌ LİSTEDE YOK: {input_kod}")
 
-# --- 3. ADIM: RAPORLAMA ---
-if st.button("📊 Eksikleri Listele"):
-    eksik_df = st.session_state.db[~st.session_state.db['Sipariş No'].isin(st.session_state.okutulanlar)].copy()
-    if not eksik_df.empty:
-        st.dataframe(eksik_df, use_container_width=True)
-        
-        # CSV Çıktısı (UTF-8 SIG ile Türkçe karakter desteği)
-        csv_data = eksik_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-        st.download_button("📂 Eksik Listesini İndir", data=csv_data, file_name="eksikler.csv")
-    else:
-        st.success("Tüm siparişler tamam!")
+# --- 3. ADIM: RAPORLAMA VE SIFIRLAMA BUTONLARI ---
+st.divider()
+col_rapor, col_sifirla = st.columns(2)
 
-if st.sidebar.button("🔄 Sistemi Sıfırla"):
-    st.session_state.db = pd.DataFrame(columns=['Sipariş No', 'Müşteri Adı', 'Personel No'])
-    st.session_state.okutulanlar = set()
-    st.rerun()
+with col_rapor:
+    btn_eksik = st.button("📊 Eksikleri Listele")
+
+with col_sifirla:
+    if st.button("🔄 Paneli Sıfırla"):
+        st.session_state.db = pd.DataFrame(columns=['Sipariş No', 'Müşteri Adı', 'Personel No'])
+        st.session_state.okutulanlar = set()
+        st.rerun()
+
+if btn_eksik:
+    eksik_df = st.session_state.db[~st.session_state.db['Sipariş No'].isin(st.session_state.okutulanlar)].copy()
+    
+    if not eksik_df.empty:
+        eksik_df.insert(0, 'Sıra No', range(1, len(eksik_df) + 1))
+        st.markdown("### 📋 EKSİK SİPARİŞ LİSTESİ")
+        st.dataframe(eksik_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("#### 📥 Listeyi İndir")
+        download_col1, download_col2 = st.columns(2)
+
+        # --- PDF OLARAK İNDİR ---
+        with download_col1:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 14)
+            pdf.cell(190, 10, "EKSIK SIPARIS LISTESI", ln=True, align='C')
+            pdf.set_font("Arial", size=10)
+            pdf.ln(5)
+            pdf.cell(15, 8, "Sira", 1); pdf.cell(45, 8, "Siparis No", 1); pdf.cell(90, 8, "Musteri Adi", 1); pdf.cell(30, 8, "Pers. No", 1); pdf.ln()
+            for i, r in eksik_df.iterrows():
+                isim_temiz = str(r['Müşteri Adı']).replace('İ','I').replace('ğ','g').replace('ü','u').replace('ş','s').replace('ö','o').replace('ç','c').replace('Ğ','G').replace('Ü','U').replace('Ş','S').replace('Ö','O').replace('Ç','C')
+                pdf.cell(15, 8, str(r['Sıra No']), 1)
+                pdf.cell(45, 8, str(r['Sipariş No']), 1)
+                pdf.cell(90, 8, isim_temiz[:40], 1)
+                pdf.cell(30, 8, str(r['Personel No']), 1)
+                pdf.ln()
+            pdf_output = pdf.output(dest='S').encode('latin-1', 'replace')
+            st.download_button("📄 PDF İndir", data=pdf_output, file_name="eksik_liste.pdf", mime="application/pdf")
+
+        # --- ODS OLARAK İNDİR ---
+        with download_col2:
+            output_ods = io.BytesIO()
+            with pd.ExcelWriter(output_ods, engine='odf') as writer:
+                eksik_df.to_excel(writer, index=False, sheet_name='Eksikler')
+            st.download_button("📂 ODS İndir", data=output_ods.getvalue(), file_name="eksik_liste.ods", mime="application/vnd.oasis.opendocument.spreadsheet")
+            
+    else:
+        st.success("Tüm siparişler tamamlanmış, eksik yok!")
